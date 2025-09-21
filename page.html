@@ -1,0 +1,182 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Bass Fret Flashcards</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    :root { font-family: system-ui, Arial, sans-serif; }
+    body { display:flex; min-height:100svh; margin:0; background:#0f172a; color:#e2e8f0; }
+    .wrap { margin:auto; text-align:center; width:min(100%, 900px); padding:24px; }
+
+    .title { font-size: clamp(18px, 2.8vw, 22px); opacity:.9; margin-bottom: 10px; }
+
+    .selectors { display:flex; gap:.6rem; justify-content:center; flex-wrap:wrap; margin-bottom: 16px; }
+    .chip {
+      display:inline-flex; align-items:center; gap:.5rem;
+      padding:.6rem .9rem; border-radius:14px; font-weight:700; cursor:pointer;
+      background:#1f2937; color:#e2e8f0; user-select:none;
+    }
+    .chip input { display:none; }
+    .chip.active { background:#34d399; color:#0f172a; }
+
+    .card { font-size: clamp(28px, 8vw, 80px); font-weight: 800; letter-spacing: 1px; }
+    .sub  { font-size: clamp(18px, 4vw, 36px); opacity:.9; margin-top: .4rem; }
+
+    .buttons { margin-top: 1.4rem; display:flex; gap:1rem; justify-content:center; flex-wrap:wrap; }
+    button.action { font-size: clamp(16px, 2.8vw, 22px); padding:.9rem 1.2rem; border:0; border-radius:14px; cursor:pointer; background:#22d3ee; color:#0f172a; font-weight:700; }
+    button.secondary { background:#94a3b8; color:#0f172a; }
+    button:disabled { opacity:.5; cursor:not-allowed; }
+
+    .prefs { margin-top: 1rem; font-size: 16px; opacity:.85; }
+    input[type="checkbox"] { transform: scale(1.2); margin-right:.4rem; }
+
+    .hint { margin-top:10px; opacity:.7; font-size: 14px; }
+    .warn { margin-top:8px; color:#fca5a5; display:none; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="title">Select any strings to drill (1=E, 2=A, 3=D, 4=G). First card starts on E if selected.</div>
+
+    <div class="selectors" id="selectors">
+      <!-- String chips -->
+      <label class="chip active" data-string="1"><input type="checkbox" checked>1 (E)</label>
+      <label class="chip" data-string="2"><input type="checkbox">2 (A)</label>
+      <label class="chip" data-string="3"><input type="checkbox">3 (D)</label>
+      <label class="chip" data-string="4"><input type="checkbox">4 (G)</label>
+    </div>
+
+    <div id="prompt" class="card">Click “New Card”</div>
+    <div id="answer" class="sub" style="visibility:hidden;">Fret ?</div>
+
+    <div class="buttons">
+      <button id="new" class="action">New Card</button>
+      <button id="reveal" class="action secondary" disabled>Reveal Fret</button>
+    </div>
+
+    <div class="prefs">
+      <label><input type="checkbox" id="preferSharps" checked>Prefer sharps (F#) over flats (Gb)</label>
+    </div>
+
+    <div id="warning" class="warn">Select at least one string.</div>
+    <div class="hint">Shortcuts: Enter = New • Space = Reveal • 1/2/3/4 = toggle strings</div>
+  </div>
+
+  <script>
+    // Strings: 1=E (low), 2=A, 3=D, 4=G (high). Frets 1..11
+    const ENTRIES = [
+      // E
+      [1,1,"F"],[1,2,"F#/Gb"],[1,3,"G"],[1,4,"G#/Ab"],[1,5,"A"],[1,6,"A#/Bb"],[1,7,"B"],[1,8,"C"],[1,9,"C#/Db"],[1,10,"D"],[1,11,"D#/Eb"],
+      // A
+      [2,1,"A#/Bb"],[2,2,"B"],[2,3,"C"],[2,4,"C#/Db"],[2,5,"D"],[2,6,"D#/Eb"],[2,7,"E"],[2,8,"F"],[2,9,"F#/Gb"],[2,10,"G"],[2,11,"G#/Ab"],
+      // D
+      [3,1,"D#/Eb"],[3,2,"E"],[3,3,"F"],[3,4,"F#/Gb"],[3,5,"G"],[3,6,"G#/Ab"],[3,7,"A"],[3,8,"A#/Bb"],[3,9,"B"],[3,10,"C"],[3,11,"C#/Db"],
+      // G
+      [4,1,"G#/Ab"],[4,2,"A"],[4,3,"A#/Bb"],[4,4,"B"],[4,5,"C"],[4,6,"C#/Db"],[4,7,"D"],[4,8,"D#/Eb"],[4,9,"E"],[4,10,"F"],[4,11,"F#/Gb"],
+    ];
+
+    const $ = id => document.getElementById(id);
+    const preferSharps = note => note.includes('/') ? ($('preferSharps').checked ? note.split('/')[0] : note.split('/')[1]) : note;
+
+    let current = null;       // [string, fret, note]
+    let firstCard = true;     // force first pick on E or lowest selected
+
+    function selectedStrings() {
+      const chips = Array.from(document.querySelectorAll('.chip'));
+      const sel = chips.filter(c => c.classList.contains('active')).map(c => Number(c.dataset.string));
+      return sel.sort((a,b)=>a-b);
+    }
+
+    function poolForSelection() {
+      const sel = new Set(selectedStrings());
+      return ENTRIES.filter(([s]) => sel.has(s));
+    }
+
+    function updateUIState() {
+      const sel = selectedStrings();
+      const none = sel.length === 0;
+      $('new').disabled = none;
+      $('reveal').disabled = !current; // reveal only when a card exists
+      $('warning').style.display = none ? 'block' : 'none';
+    }
+
+    function setChipActive(chip, active) {
+      chip.classList.toggle('active', active);
+      chip.querySelector('input').checked = active;
+    }
+
+    function toggleString(n) {
+      const chip = document.querySelector(`.chip[data-string="${n}"]`);
+      const active = chip.classList.contains('active');
+      // Toggle it
+      setChipActive(chip, !active);
+      // If nothing left selected, show warning & disable buttons
+      if (selectedStrings().length === 0) {
+        current = null;
+        $('prompt').textContent = 'Select a string and click “New Card”';
+        $('answer').style.visibility = 'hidden';
+      }
+      firstCard = true;
+      updateUIState();
+    }
+
+    function firstStringForStart(sel) {
+      // If E (1) selected, start there; else lowest-numbered selected
+      if (sel.includes(1)) return 1;
+      return Math.min(...sel);
+    }
+
+    function newCard() {
+      const sel = selectedStrings();
+      if (sel.length === 0) { updateUIState(); return; }
+
+      let candidates = poolForSelection();
+      if (firstCard) {
+        const startOn = firstStringForStart(sel);
+        candidates = candidates.filter(([s]) => s === startOn);
+        firstCard = false;
+      }
+      current = candidates[Math.floor(Math.random() * candidates.length)];
+      const [string, fret, note] = current;
+      $('prompt').textContent = `String ${string}, ${preferSharps(note)}`;
+      const ans = $('answer');
+      ans.textContent = `Fret ${fret}`;
+      ans.style.visibility = 'hidden';
+      $('reveal').disabled = false;
+    }
+
+    function reveal() {
+      if (!current) return;
+      $('answer').style.visibility = 'visible';
+    }
+
+    // Wire up chips
+    document.querySelectorAll('.chip').forEach(chip => {
+      chip.addEventListener('click', () => toggleString(Number(chip.dataset.string)));
+    });
+
+    // Buttons
+    $('new').addEventListener('click', newCard);
+    $('reveal').addEventListener('click', reveal);
+
+    // Prefer sharps toggle updates prompt live
+    $('preferSharps').addEventListener('change', () => {
+      if (current) {
+        const [string,, note] = current;
+        $('prompt').textContent = `String ${string}, ${preferSharps(note)}`;
+      }
+    });
+
+    // Keyboard shortcuts
+    window.addEventListener('keydown', e => {
+      if (e.key === 'Enter') newCard();
+      if (e.code === 'Space') { e.preventDefault(); reveal(); }
+      if (['1','2','3','4'].includes(e.key)) toggleString(Number(e.key));
+    });
+
+    // Initial UI state (only E selected)
+    updateUIState();
+  </script>
+</body>
+</html>
